@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Payment - Delivery System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .payment-container {
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+        .payment-method-card {
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .payment-method-card:hover {
+            border-color: #3b82f6;
+            transform: translateY(-2px);
+        }
+        .payment-method-card.selected {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .payment-icon {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+        .card-form {
+            display: none;
+            margin-top: 20px;
+        }
+        .card-form.active {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="payment-container">
+        <h2 class="mb-4">Payment Details</h2>
+        
+        <div id="paymentMethods">
+            <!-- Card Payment -->
+            <div class="payment-method-card" onclick="selectPaymentMethod('CARD')">
+                <div class="d-flex align-items-center">
+                    <span class="payment-icon">💳</span>
+                    <div>
+                        <h5 class="mb-1">Card Payment</h5>
+                        <p class="mb-0 text-muted">Pay securely with your credit or debit card</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bank Transfer -->
+            <div class="payment-method-card" onclick="selectPaymentMethod('BANK_TRANSFER')">
+                <div class="d-flex align-items-center">
+                    <span class="payment-icon">🏦</span>
+                    <div>
+                        <h5 class="mb-1">Bank Transfer</h5>
+                        <p class="mb-0 text-muted">Pay directly from your bank account</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cash Payment -->
+            <div class="payment-method-card" onclick="selectPaymentMethod('CASH')">
+                <div class="d-flex align-items-center">
+                    <span class="payment-icon">💵</span>
+                    <div>
+                        <h5 class="mb-1">Cash Payment</h5>
+                        <p class="mb-0 text-muted">Pay in cash upon delivery</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card Payment Form -->
+        <div id="cardForm" class="card-form">
+            <div class="mb-3">
+                <label for="cardNumber" class="form-label">Card Number</label>
+                <input type="text" class="form-control" id="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19" onkeypress="return onlyNumbers(event)" onkeyup="formatCardNumber(this)">
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="expiryDate" class="form-label">Expiry Date</label>
+                    <input type="text" class="form-control" id="expiryDate" placeholder="MM/YY" maxlength="5" onkeypress="return onlyNumbers(event)" onkeyup="formatExpiryDate(this)">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="cvv" class="form-label">CVV</label>
+                    <input type="text" class="form-control" id="cvv" placeholder="123" maxlength="3" onkeypress="return onlyNumbers(event)">
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="cardName" class="form-label">Name on Card</label>
+                <input type="text" class="form-control" id="cardName">
+            </div>
+        </div>
+
+        <!-- Bank Transfer Details -->
+        <div id="bankForm" class="card-form">
+            <div class="alert alert-info">
+                <h6 class="alert-heading">Bank Transfer Details</h6>
+                <p class="mb-0">
+                    Bank: Example Bank<br>
+                    Account Number: 1234567890<br>
+                    Sort Code: 12-34-56<br>
+                    Reference: ORDER-<span th:text="${orderId}"></span>
+                </p>
+            </div>
+        </div>
+
+        <button onclick="processPayment()" class="btn btn-primary w-100 mt-4">
+            Confirm Payment
+        </button>
+    </div>
+
+    <script>
+        let selectedMethod = null;
+        const orderId = /*[[${orderId}]]*/ null;
+
+        function onlyNumbers(event) {
+            const charCode = (event.which) ? event.which : event.keyCode;
+            if (charCode > 31 && (charCode < 48 || charCode > 57)) {
+                return false;
+            }
+            return true;
+        }
+
+        function formatCardNumber(input) {
+            let value = input.value.replace(/\D/g, '');
+            let formattedValue = '';
+            for (let i = 0; i < value.length; i++) {
+                if (i > 0 && i % 4 === 0) {
+                    formattedValue += ' ';
+                }
+                formattedValue += value[i];
+            }
+            input.value = formattedValue;
+        }
+
+        function formatExpiryDate(input) {
+            let value = input.value.replace(/\D/g, '');
+            if (value.length >= 2) {
+                value = value.substring(0, 2) + '/' + value.substring(2);
+            }
+            input.value = value;
+        }
+
+        function selectPaymentMethod(method) {
+            selectedMethod = method;
+            
+            // Update UI
+            document.querySelectorAll('.payment-method-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+            
+            // Show/hide forms
+            document.getElementById('cardForm').classList.toggle('active', method === 'CARD');
+            document.getElementById('bankForm').classList.toggle('active', method === 'BANK_TRANSFER');
+        }
+
+        async function processPayment() {
+            if (!selectedMethod) {
+                alert('Please select a payment method');
+                return;
+            }
+
+            try {
+                const response = await fetch('/payments/process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        orderId: orderId,
+                        amount: 1000, // Replace with actual amount
+                        method: selectedMethod
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Payment failed');
+                }
+
+                const result = await response.json();
+                
+                if (result.status === 'COMPLETED') {
+                    alert('Payment successful!');
+                    window.location.href = '/orders/success';
+                } else {
+                    alert('Payment failed. Please try again.');
+                }
+            } catch (error) {
+                alert('Payment failed: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

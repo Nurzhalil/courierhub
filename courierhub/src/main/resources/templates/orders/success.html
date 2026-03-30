@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Order Success - Delivery System</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen flex items-center justify-center">
+        <div class="max-w-md w-full p-6">
+            <div class="bg-white rounded-lg shadow-lg p-6 text-center">
+                <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                </div>
+                
+                <h2 class="text-2xl font-bold text-gray-900 mb-2">Order Created Successfully!</h2>
+                <p class="text-gray-600 mb-6">Your delivery order has been created and will be processed shortly.</p>
+                
+                <div class="space-x-4">
+                    <a href="/orders/new" class="inline-block bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                        Create Another Order
+                    </a>
+                    <a href="/dashboard" class="inline-block text-blue-600 hover:text-blue-500">
+                        Go to Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

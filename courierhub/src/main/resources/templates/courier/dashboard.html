@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <title>Courier Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+
+    <!-- Leaflet JS (всегда первым из скриптов) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Routing Machine (всегда после Leaflet.js) -->
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+            border-radius: 8px;
+        }
+
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .order-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .break-modal .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .order-update {
+            animation: fadeIn 0.5s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .nav-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        .nav-header .logout-button {
+            margin-left: auto;
+        }
+    </style>
+</head>
+
+<body class="bg-light">
+    <div class="dashboard-container">
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>Welcome, <span th:text="${courier.fullName}"></span></h2>
+                    <div>
+                        <button type="button" class="btn btn-warning" data-bs-toggle="modal"
+                            data-bs-target="#breakModal">
+                            Take a Break
+                        </button>
+                        <form th:action="@{/logout}" method="post" class="d-inline">
+                            <button type="submit" class="btn btn-outline-danger">Logout</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <!-- Current Status -->
+                <div class="order-card p-4 mb-4">
+                    <h5 class="card-title">Current Status</h5>
+                    <p class="mb-2">
+                        Status: <span id="courierStatus" th:text="${courier.status}" class="badge bg-primary"></span>
+                    </p>
+                    <p class="mb-0">
+                        Rejections today: <span id="rejectionCount" th:text="${courier.dailyRejections}"></span>/3
+                    </p>
+                </div>
+
+                <!-- Current/Nearest Order -->
+                <div id="orderContainer" class="order-card p-4" th:if="${currentOrder != null || nearestOrder != null}">
+                    <h5 class="card-title" id="orderTitle" th:text="${currentOrder != null ? 'Current Order' : 'Nearest Order'}"></h5>
+                    <div th:with="order=${currentOrder != null ? currentOrder : nearestOrder}">
+                        <p class="mb-2">
+                            <strong>Order ID:</strong> <span id="orderId" th:text="${order.id}"></span>
+                        </p>
+                        <p class="mb-2">
+                            <strong>From:</strong> <span id="fromAddress" th:text="${order.fromAddress}"></span>
+                        </p>
+                        <p class="mb-2">
+                            <strong>To:</strong> <span id="toAddress" th:text="${order.toAddress}"></span>
+                        </p>
+                        <p class="mb-2">
+                            <strong>Item:</strong> <span id="itemDescription" th:text="${order.itemDescription}"></span>
+                        </p>
+
+                        <div id="orderActions" class="mt-3" th:if="${currentOrder == null && nearestOrder != null}">
+                            <button onclick="acceptOrder()" class="btn btn-success me-2">Accept</button>
+                            <button onclick="rejectOrder()" class="btn btn-danger"
+                                th:disabled="${courier.dailyRejections >= 3}">Reject</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="order-card">
+                    <div id="map"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Break Modal -->
+    <div class="modal fade" id="breakModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Schedule Break</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="startTime">Start Time</label>
+                        <input type="datetime-local" class="form-control" id="startTime">
+                    </div>
+                    <div class="form-group">
+                        <label for="endTime">End Time</label>
+                        <input type="datetime-local" class="form-control" id="endTime">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="startBreak()">Start Break</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script th:inline="javascript">
+        const courier = /*[[${courier}]]*/ null;
+        let currentOrder = /*[[${currentOrder}]]*/ null;
+        let nearestOrder = /*[[${nearestOrder}]]*/ null;
+        let map, courierMarker, routingControls = [];
+
+        // Initialize map
+        function initializeMap() {
+            map = L.map('map').setView([courier.currentLatitude || 55.76, courier.currentLongitude || 37.64], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+        }
+
+        // Update courier marker
+        function updateCourierMarker(lat, lng) {
+            if (courierMarker) {
+                courierMarker.setLatLng([lat, lng]);
+                map.setView([lat, lng]);
+            } else {
+                courierMarker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        html: '🚚',
+                        className: 'courier-marker',
+                        iconSize: [25, 25]
+                    })
+                }).addTo(map);
+                map.setView([lat, lng]);
+            }
+        }
+
+        // Clear existing routes
+        function clearRoutes() {
+            routingControls.forEach(control => map.removeControl(control));
+            routingControls = [];
+        }
+
+        // Update map with order
+        function updateMapWithOrder(order) {
+            if (!order) return;
+
+            clearRoutes();
+
+            const fromMarker = L.marker([order.fromLatitude, order.fromLongitude])
+                .addTo(map)
+                .bindPopup('Pickup Location');
+
+            const toMarker = L.marker([order.toLatitude, order.toLongitude])
+                .addTo(map)
+                .bindPopup('Delivery Location');
+
+            const bounds = L.latLngBounds([
+                [order.fromLatitude, order.fromLongitude],
+                [order.toLatitude, order.toLongitude]
+            ]);
+            
+            if (courier.currentLatitude && courier.currentLongitude) {
+                bounds.extend([courier.currentLatitude, courier.currentLongitude]);
+            }
+            
+            map.fitBounds(bounds, { padding: [50, 50] });
+
+            // Add route from pickup to delivery
+            const routeControl1 = L.Routing.control({
+                waypoints: [
+                    L.latLng(order.fromLatitude, order.fromLongitude),
+                    L.latLng(order.toLatitude, order.toLongitude)
+                ],
+                routeWhileDragging: false,
+                addWaypoints: false,
+                draggableWaypoints: false,
+                createMarker: () => null,
+                show: false
+            }).addTo(map);
+
+            // Add route from courier to pickup
+            const routeControl2 = L.Routing.control({
+                waypoints: [
+                    L.latLng(courier.currentLatitude, courier.currentLongitude),
+                    L.latLng(order.fromLatitude, order.fromLongitude)
+                ],
+                routeWhileDragging: false,
+                addWaypoints: false,
+                draggableWaypoints: false,
+                lineOptions: {
+                    styles: [{ color: 'blue', opacity: 0.7, weight: 4, dashArray: '5, 10' }]
+                },
+                createMarker: () => null,
+                show: false
+            }).addTo(map);
+
+            routingControls.push(routeControl1, routeControl2);
+        }
+
+        // Update order display
+        function updateOrderDisplay(order, isCurrentOrder) {
+            const orderContainer = document.getElementById('orderContainer');
+            if (!order) {
+                orderContainer.style.display = 'none';
+                return;
+            }
+
+            orderContainer.style.display = 'block';
+            document.getElementById('orderTitle').textContent = isCurrentOrder ? 'Current Order' : 'Nearest Order';
+            document.getElementById('orderId').textContent = order.id;
+            document.getElementById('fromAddress').textContent = order.fromAddress;
+            document.getElementById('toAddress').textContent = order.toAddress;
+            document.getElementById('itemDescription').textContent = order.itemDescription;
+
+            const orderActions = document.getElementById('orderActions');
+            if (orderActions) {
+                orderActions.style.display = isCurrentOrder ? 'none' : 'block';
+            }
+
+            orderContainer.classList.add('order-update');
+            setTimeout(() => orderContainer.classList.remove('order-update'), 500);
+        }
+
+        // Fetch available orders
+        async function fetchAvailableOrders() {
+            try {
+                const response = await fetch('/courier/available-orders');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.currentOrder || data.nearestOrder) {
+                        if (data.currentOrder) {
+                            currentOrder = data.currentOrder;
+                            nearestOrder = null;
+                            updateOrderDisplay(currentOrder, true);
+                        } else if (data.nearestOrder && !currentOrder) {
+                            nearestOrder = data.nearestOrder;
+                            updateOrderDisplay(nearestOrder, false);
+                        }
+                        updateMapWithOrder(currentOrder || nearestOrder);
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching orders:', error);
+            }
+        }
+
+        // Initialize
+        initializeMap();
+        if (currentOrder || nearestOrder) {
+            updateMapWithOrder(currentOrder || nearestOrder);
+        }
+
+        // Start periodic updates
+        setInterval(fetchAvailableOrders, 10000); // Check every 10 seconds
+
+        // Geolocation tracking
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(position => {
+                const { latitude, longitude } = position.coords;
+                updateCourierMarker(latitude, longitude);
+
+                fetch('/courier/location', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ latitude, longitude })
+                });
+            });
+        }
+
+        // Order management functions
+        async function acceptOrder() {
+            if (!nearestOrder) return;
+
+            try {
+                const response = await fetch(`/courier/orders/${nearestOrder.id}/accept`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    currentOrder = nearestOrder;
+                    nearestOrder = null;
+                    updateOrderDisplay(currentOrder, true);
+                    updateMapWithOrder(currentOrder);
+                } else {
+                    alert('Failed to accept order');
+                }
+            } catch (error) {
+                console.error('Error accepting order:', error);
+                alert('Failed to accept order');
+            }
+        }
+
+        async function rejectOrder() {
+            if (!nearestOrder) return;
+
+            try {
+                const response = await fetch(`/courier/orders/${nearestOrder.id}/reject`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    nearestOrder = null;
+                    document.getElementById('orderContainer').style.display = 'none';
+                    document.getElementById('rejectionCount').textContent = 
+                        (parseInt(document.getElementById('rejectionCount').textContent) + 1).toString();
+                    clearRoutes();
+                    await fetchAvailableOrders();
+                } else {
+                    alert('Failed to reject order');
+                }
+            } catch (error) {
+                console.error('Error rejecting order:', error);
+                alert('Failed to reject order');
+            }
+        }
+
+        // Break management
+        async function startBreak() {
+            const startTime = document.getElementById('startTime').value;
+            const endTime = document.getElementById('endTime').value;
+
+            try {
+                const response = await fetch('/courier/break', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ startTime, endTime })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('courierStatus').textContent = 'ON_BREAK';
+                    document.getElementById('courierStatus').className = 'badge bg-warning';
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('breakModal'));
+                    modal.hide();
+                } else {
+                    alert('Failed to start break');
+                }
+            } catch (error) {
+                console.error('Error starting break:', error);
+                alert('Failed to start break');
+            }
+        }
+    </script>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Courier Location - Admin Panel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+            border-radius: 8px;
+        }
+        .info-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .route-info {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #f8fafc;
+            border-radius: 0.5rem;
+            border: 1px solid #e2e8f0;
+        }
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .status-available { background-color: #dcfce7; color: #166534; }
+        .status-delivery { background-color: #dbeafe; color: #1e40af; }
+        .status-break { background-color: #fef3c7; color: #92400e; }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="info-container">
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>Courier Location</h2>
+                    <a href="/admin/couriers" class="btn btn-secondary">Back to List</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Courier Information</h5>
+                        <div class="mb-3">
+                            <span th:class="'status-badge ' + 
+                                         (${courier.status == 'AVAILABLE'} ? 'status-available' : '') + 
+                                         (${courier.status == 'ON_DELIVERY'} ? 'status-delivery' : '') + 
+                                         (${courier.status == 'ON_BREAK'} ? 'status-break' : '')"
+                                  th:text="${courier.status}">
+                            </span>
+                        </div>
+                        <p class="card-text">
+                            <strong>Name:</strong> <span th:text="${courier.fullName}"></span><br>
+                            <strong>Phone:</strong> <span th:text="${courier.phone}"></span><br>
+                            <strong>City:</strong> <span th:text="${courier.city}"></span>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card mb-4" th:if="${currentOrder != null}">
+                    <div class="card-body">
+                        <h5 class="card-title">Current Order</h5>
+                        <p class="card-text">
+                            <strong>Order #:</strong> <span th:text="${currentOrder.id}"></span><br>
+                            <strong>From:</strong> <span th:text="${currentOrder.fromAddress}"></span><br>
+                            <strong>To:</strong> <span th:text="${currentOrder.toAddress}"></span><br>
+                            <strong>Status:</strong> <span th:text="${currentOrder.status}"></span>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card" th:if="${routeInfo != null}">
+                    <div class="card-body">
+                        <h5 class="card-title">Route Information</h5>
+                        <div class="route-info">
+                            <p class="mb-2">
+                                <strong>To pickup:</strong>
+                                <span id="pickupDistance">Calculating...</span>
+                            </p>
+                            <p class="mb-0">
+                                <strong>To delivery:</strong>
+                                <span id="deliveryDistance">Calculating...</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <div id="map"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script th:inline="javascript">
+        const courier = /*[[${courier}]]*/ null;
+        const currentOrder = /*[[${currentOrder}]]*/ null;
+        const routeInfo = /*[[${routeInfo}]]*/ null;
+        
+        // Initialize map
+        const map = L.map('map').setView([55.76, 37.64], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let courierMarker;
+        let pickupRoute;
+        let deliveryRoute;
+
+        function updateCourierMarker(lat, lng) {
+            if (courierMarker) {
+                courierMarker.setLatLng([lat, lng]);
+            } else {
+                courierMarker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        html: '🚚',
+                        className: 'courier-marker',
+                        iconSize: [25, 25]
+                    })
+                }).addTo(map);
+            }
+        }
+
+        function updateRoutes(routeInfo) {
+            if (pickupRoute) map.removeLayer(pickupRoute);
+            if (deliveryRoute) map.removeLayer(deliveryRoute);
+
+            if (routeInfo.routeToPickup) {
+                pickupRoute = L.polyline(routeInfo.routeToPickup.points.map(p => [p.latitude, p.longitude]), {
+                    color: '#10B981',
+                    weight: 4
+                }).addTo(map);
+
+                document.getElementById('pickupDistance').textContent = 
+                    `${routeInfo.routeToPickup.distance.toFixed(1)} km (${Math.round(routeInfo.routeToPickup.duration)} min)`;
+            }
+
+            if (routeInfo.routeToDelivery) {
+                deliveryRoute = L.polyline(routeInfo.routeToDelivery.points.map(p => [p.latitude, p.longitude]), {
+                    color: '#3B82F6',
+                    weight: 4
+                }).addTo(map);
+
+                document.getElementById('deliveryDistance').textContent = 
+                    `${routeInfo.routeToDelivery.distance.toFixed(1)} km (${Math.round(routeInfo.routeToDelivery.duration)} min)`;
+            }
+        }
+
+        // Initialize markers and routes
+        if (courier.currentLatitude && courier.currentLongitude) {
+            updateCourierMarker(courier.currentLatitude, courier.currentLongitude);
+        }
+
+        if (currentOrder) {
+            const fromMarker = L.marker([currentOrder.fromLatitude, currentOrder.fromLongitude], {
+                icon: L.divIcon({
+                    html: '📦',
+                    className: 'pickup-marker',
+                    iconSize: [25, 25]
+                })
+            }).addTo(map).bindPopup('Pickup Location');
+            
+            const toMarker = L.marker([currentOrder.toLatitude, currentOrder.toLongitude], {
+                icon: L.divIcon({
+                    html: '📍',
+                    className: 'delivery-marker',
+                    iconSize: [25, 25]
+                })
+            }).addTo(map).bindPopup('Delivery Location');
+
+            // Fit map to show all points
+            const bounds = L.latLngBounds([
+                [currentOrder.fromLatitude, currentOrder.fromLongitude],
+                [currentOrder.toLatitude, currentOrder.toLongitude]
+            ]);
+            
+            if (courier.currentLatitude && courier.currentLongitude) {
+                bounds.extend([courier.currentLatitude, courier.currentLongitude]);
+            }
+            
+            map.fitBounds(bounds, { padding: [50, 50] });
+
+            if (routeInfo) {
+                updateRoutes(routeInfo);
+            }
+        }
+
+        // Real-time updates
+        async function updateCourierStatus() {
+            try {
+                const response = await fetch(`/admin/api/couriers/${courier.id}/status`);
+                const data = await response.json();
+                
+                if (data.latitude && data.longitude) {
+                    updateCourierMarker(data.latitude, data.longitude);
+                }
+                
+                if (data.routeInfo) {
+                    updateRoutes(data.routeInfo);
+                }
+            } catch (error) {
+                console.error('Failed to update courier status:', error);
+            }
+        }
+
+        // Update every 10 seconds
+        setInterval(updateCourierStatus, 10000);
+    </script>
+</body>
+</html>
